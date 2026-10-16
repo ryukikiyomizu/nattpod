@@ -1,5 +1,6 @@
 package com.skythrew.kattpad.ui.theme
 
+import androidx.compose.ui.graphics.Color
 import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -12,13 +13,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 
 private val DarkColorScheme = darkColorScheme(
-    primary = Purple80,
+    primary = Color(0xFFC7DDB5),
+    primaryContainer = Color(0xFF2E452D),
+    background = Color(0xFF141814),
+    surface = Color(0xFF141814),
     secondary = PurpleGrey80,
     tertiary = Pink80
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = Purple40,
+    primary = Color(0xFF365C39),
+    primaryContainer = Color(0xFFDFEAD5),
+    onPrimaryContainer = Color(0xFF203623),
+    background = Color(0xFFFCFAF5),
+    surface = Color(0xFFFCFAF5),
+    surfaceVariant = Color(0xFFEEEFE7),
     secondary = PurpleGrey40,
     tertiary = Pink40
 
@@ -37,7 +46,7 @@ private val LightColorScheme = lightColorScheme(
 fun KattpadTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     // Dynamic color is available on Android 12+
-    dynamicColor: Boolean = true,
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {

@@ -60,6 +60,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.skythrew.kattpad.domain.attempt
 import androidx.core.text.HtmlCompat
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
@@ -77,160 +79,117 @@ import kotlinx.serialization.Serializable
 @Composable
 fun PartScreen(navController: NavController, client: Wattpad, storyId: Int, id: Int) {
     BackHandler {
-        if(!navController.popBackStack(StoryScreen(storyId), inclusive = false))
-            navController.popBackStack(HomeScreen, inclusive = false)
+        if (!navController.popBackStack(StoryScreen(storyId), inclusive = false))
+            navController.popBackStack()
     }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val preferences = remember { context.getSharedPreferences("reader", android.content.Context.MODE_PRIVATE) }
+    var fontSize by remember { mutableIntStateOf(preferences.getInt("font_size", 18).coerceIn(14, 30)) }
+    var appearance by remember { mutableStateOf(preferences.getString("appearance", "Paper") ?: "Paper") }
+    var settings by remember { mutableStateOf(false) }
+    var loading by remember(id) { mutableStateOf(true) }
+    var failed by remember(id) { mutableStateOf(false) }
+    var retry by remember { mutableIntStateOf(0) }
+    var part by remember(id) { mutableStateOf<Part?>(null) }
+    var text by remember(id) { mutableStateOf("") }
+    var voted by remember(id) { mutableStateOf(false) }
+    var voteCount by remember(id) { mutableStateOf<Int?>(null) }
+    var previous by remember(id) { mutableStateOf<Int?>(null) }
+    var next by remember(id) { mutableStateOf<Int?>(null) }
+    var voting by remember { mutableStateOf(false) }
+    val showComments = remember { mutableStateOf(false) }
+    val snackbar = remember { androidx.compose.material3.SnackbarHostState() }
 
-    val coroutineScope = rememberCoroutineScope()
-
-    var isLoading by remember {
-        mutableStateOf(true)
+    LaunchedEffect(fontSize, appearance) {
+        preferences.edit().putInt("font_size", fontSize).putString("appearance", appearance).apply()
     }
-
-    var part: Part? by remember {
-        mutableStateOf(null)
+    LaunchedEffect(id, retry) {
+        loading = true
+        failed = false
+        attempt {
+            val loaded = client.fetchStoryPart(id, setOf("title", "group", "readCount", "voteCount", "commentCount", "voted"))
+            text = HtmlCompat.fromHtml(loaded.fetchText(), HtmlCompat.FROM_HTML_MODE_COMPACT).toString()
+            val chapters = loaded.data.story?.parts.orEmpty()
+            val index = chapters.indexOfFirst { it.id == id }
+            previous = if (index > 0) chapters.getOrNull(index - 1)?.id else null
+            next = if (index >= 0) chapters.getOrNull(index + 1)?.id else null
+            part = loaded
+            voted = loaded.data.voted == true
+            voteCount = loaded.data.voteCount
+        }.onFailure { failed = true }
+        loading = false
+        // Sync is best-effort; reading must remain available if the sync endpoint fails.
+        if (!failed && client.loggedIn) attempt { part?.syncReadingPosition() }
     }
+    val paper = when (appearance) { "Night" -> Color(0xFF191D1B); "Sepia" -> Color(0xFFF3E8D2); else -> Color(0xFFFCFAF5) }
+    val ink = if (appearance == "Night") Color(0xFFE4E5DC) else Color(0xFF262C28)
+    val paragraphs = remember(text) { text.split(Regex("\\n\\s*\\n")).filter { it.isNotBlank() } }
+    val listState = androidx.compose.runtime.key(id) { rememberLazyListState() }
 
-    var voted: Boolean? by remember {
-        mutableStateOf(null)
-    }
-
-    var voteCount: Int? by remember {
-        mutableStateOf(null)
-    }
-
-    var partText: String? by remember {
-        mutableStateOf(null)
-    }
-
-    var prevPartId: Int? by remember {
-        mutableStateOf(null)
-    }
-
-    var nextPartId: Int? by remember {
-        mutableStateOf(null)
-    }
-
-    val showModal = remember {
-        mutableStateOf(false)
-    }
-
-    LaunchedEffect(key1 = id) {
-        isLoading = true
-
-        part = client.fetchStoryPart(id, setOf("title", "group", "readCount", "voteCount", "commentCount", "voted"))
-        partText = part!!.fetchText()
-
-        part!!.data.story!!.parts!!.forEachIndexed { index, storyPart ->
-            if (storyPart.id == id) {
-                if (index > 0)
-                    prevPartId = part!!.data.story!!.parts!![index - 1].id
-
-                if (index + 1 < part!!.data.story!!.numParts!!)
-                    nextPartId = part!!.data.story!!.parts!![index + 1].id
-            }
-        }
-
-        voted = part!!.data.voted
-        voteCount = part!!.data.voteCount
-
-        if (client.loggedIn)
-            coroutineScope.launch { part!!.syncReadingPosition() }
-
-        isLoading = false
-    }
-
-    if (isLoading) {
-        Column (modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-            CircularProgressIndicator()
-        }
-    }
-    else {
-        val scrollBehaviour = BottomAppBarDefaults.exitAlwaysScrollBehavior()
-
-        Scaffold (
-            bottomBar = {
-                BottomAppBar (
-                    actions = {
-                        Row (
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceAround
-                        ) {
-                            NumberIconButton(icon = ImageVector.vectorResource(id = R.drawable.visibility), number = part?.data?.readCount)
-                            NumberIconButton(
-                                icon = when (voted) {
-                                    null, false -> ImageVector.vectorResource(R.drawable.outline_favorite_24)
-                                    true -> ImageVector.vectorResource(R.drawable.baseline_favorite_24)
-                                },
-                                onClick = {
-                                    if (voted != null)
-                                        coroutineScope.launch {
-                                            val req = part!!.toggleVote()
-                                            if (req != null) {
-                                                voted = part!!.data.voted
-                                                voteCount = req.votes
-                                            }
-                                        }
-                                },
-                                number = voteCount
-                            )
-                            NumberIconButton(icon = ImageVector.vectorResource(R.drawable.outline_comment_24), number = part?.data?.commentCount, onClick = {
-                                showModal.value = true
-                            })
+    Scaffold(
+        containerColor = paper,
+        snackbarHost = { androidx.compose.material3.SnackbarHost(snackbar) },
+        topBar = {
+            androidx.compose.material3.TopAppBar(
+                title = { Text(part?.data?.title ?: "Reading", maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, color = ink) },
+                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(containerColor = paper),
+                navigationIcon = { IconButton(onClick = { navController.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = ink) } },
+                actions = { TextButton(onClick = { settings = true }) { Text("Aa", color = ink) } }
+            )
+        },
+        bottomBar = {
+            if (!loading && !failed) BottomAppBar(containerColor = paper) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(enabled = previous != null, onClick = {
+                        previous?.let { navController.navigateOnce(PartScreen(it, storyId)) { popUpTo<PartScreen> { inclusive = true } } }
+                    }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Previous chapter", tint = ink.copy(alpha = if (previous != null) 1f else 0.3f)) }
+                    TextButton(enabled = client.loggedIn && !voting, onClick = {
+                        scope.launch {
+                            voting = true
+                            try {
+                                attempt {
+                                    val result = part?.toggleVote()
+                                    if (result == null) error("Vote not accepted")
+                                    voted = part?.data?.voted == true
+                                    voteCount = result.votes
+                                }.onFailure { snackbar.showSnackbar("Couldn’t update your vote. Try again.") }
+                            } finally { voting = false }
                         }
-                    },
-                    scrollBehavior = scrollBehaviour
-                )
-            }
-        ) {padding ->
-            Column (modifier = Modifier.padding(padding)) {
-                Row (verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                    IconButton(enabled = prevPartId != null, onClick = {
-                        navController.navigateOnce(PartScreen(partId = prevPartId!!, storyId = storyId))
-                    }) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(id = R.string.prev_chapter)
-                        )
-                    }
-
-                    Text(
-                        text = part?.data?.title!!,
-                        fontSize = MaterialTheme.typography.headlineMedium.fontSize,
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    IconButton(enabled = nextPartId != null, onClick = {
-                        navController.navigateOnce(PartScreen(partId = nextPartId!!, storyId = storyId))
-                    }) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowForward,
-                            contentDescription = stringResource(id = R.string.next_chapter)
-                        )
-                    }
-                }
-                HorizontalDivider(modifier = Modifier.padding(top = 10.dp))
-                LazyColumn (
-                    modifier = Modifier
-                        .nestedScroll(scrollBehaviour.nestedScrollConnection)
-                        .background(Color.White)
-                        .fillMaxSize()
-                ) {
-                    item {
-                        Text(
-                            HtmlCompat.fromHtml(partText!!, HtmlCompat.FROM_HTML_SEPARATOR_LINE_BREAK_HEADING).toString(),
-                            modifier = Modifier.padding(10.dp),
-                            color = Color.Black
-                        )
-                    }
+                    }) { Text("${if (voted) "♥" else "♡"} ${voteCount ?: 0}", color = ink) }
+                    TextButton(onClick = { showComments.value = true }) { Text("Comments", color = ink) }
+                    IconButton(enabled = next != null, onClick = {
+                        next?.let { navController.navigateOnce(PartScreen(it, storyId)) { popUpTo<PartScreen> { inclusive = true } } }
+                    }) { Icon(Icons.AutoMirrored.Filled.ArrowForward, "Next chapter", tint = ink.copy(alpha = if (next != null) 1f else 0.3f)) }
                 }
             }
-
-            if (showModal.value)
-                CommentsModal(showModal = showModal, part = part!!, client = client, navController = navController)
+        }
+    ) { padding ->
+        when {
+            loading -> Column(Modifier.padding(padding).fillMaxSize(), verticalArrangement = Arrangement.Center) { LoadingState() }
+            failed -> Column(Modifier.padding(padding)) { ErrorState("This chapter couldn’t be opened. It may be unavailable, or your connection was interrupted.") { retry++ } }
+            else -> LazyColumn(state = listState, modifier = Modifier.padding(padding).fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 28.dp, vertical = 24.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                item { Text(part?.data?.title ?: "Untitled chapter", color = ink, style = MaterialTheme.typography.headlineLarge, fontFamily = androidx.compose.ui.text.font.FontFamily.Serif) }
+                items(paragraphs) { paragraph ->
+                    Text(paragraph.trim(), color = ink, fontSize = fontSize.sp, lineHeight = (fontSize * 1.7f).sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Serif)
+                }
+                item { Text(if (next == null) "You’ve reached the end of this chapter." else "Another chapter awaits →", color = ink, modifier = Modifier.padding(vertical = 24.dp)) }
+            }
         }
     }
+    if (settings) ModalBottomSheet(onDismissRequest = { settings = false }) {
+        Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text("Make yourself comfortable", style = MaterialTheme.typography.titleLarge)
+            Text("Text size · $fontSize")
+            androidx.compose.material3.Slider(value = fontSize.toFloat(), onValueChange = { fontSize = it.toInt() }, valueRange = 14f..30f, steps = 15)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("Paper", "Sepia", "Night").forEach { name ->
+                    androidx.compose.material3.FilterChip(selected = appearance == name, onClick = { appearance = name }, label = { Text(name) })
+                }
+            }
+        }
+    }
+    if (showComments.value) part?.let { CommentsModal(showComments, it, client, navController) }
 }
 
 @Composable
@@ -289,22 +248,22 @@ fun CommentsModal(showModal: MutableState<Boolean>, part: Part, client: Wattpad,
         mutableStateOf(false)
     }
 
-    ModalBottomSheet(sheetState = modalState, onDismissRequest = { showModal.value = false }) {
-        LaunchedEffect(after) {
-            if (after == null)
-                commentsLoading = true
+    var commentsFailed by remember { mutableStateOf(false) }
+    var commentsRetry by remember { mutableIntStateOf(0) }
+    var sending by remember { mutableStateOf(false) }
 
-            val (commentsAfter, fetchedComments) = part.fetchComments(after = after)
-            commentsLeft = commentsAfter
-            commentsState.value = comments.plus(fetchedComments)
+    ModalBottomSheet(sheetState = modalState, onDismissRequest = { showModal.value = false }) {
+        LaunchedEffect(after, commentsRetry) {
+            commentsLoading = true
+            commentsFailed = false
+            attempt {
+                val (commentsAfter, fetchedComments) = part.fetchComments(after = after)
+                commentsLeft = commentsAfter
+                commentsState.value = (commentsState.value + fetchedComments).distinctBy { it.data.commentId.resourceId }
+            }.onFailure { commentsFailed = true }
             commentsLoading = false
         }
-
-        LaunchedEffect(lazyColState.canScrollForward) {
-            if(comments.isNotEmpty() && !lazyColState.canScrollForward && commentsLeft) {
-                after = comments.last().data.commentId.resourceId
-            }
-        }
+        if (commentsFailed) ErrorState("Comments couldn’t be loaded.") { commentsRetry++ }
 
         if (commentsLoading)
             Row (
@@ -334,23 +293,24 @@ fun CommentsModal(showModal: MutableState<Boolean>, part: Part, client: Wattpad,
                         keyboardActions = KeyboardActions(onSend = {}),
                         trailingIcon = {
                             IconButton(
+                                enabled = client.loggedIn && commentText.isNotBlank() && !sending,
                                 onClick = {
                                     coroutineScope.launch {
-                                        val sentComment = part.comment(commentText)
-
-                                        if (sentComment != null) {
-                                            commentSent = true
-                                            commentsState.value = listOf(sentComment).plus(comments)
-                                            commentText = ""
-                                        } else {
-                                            commentSent = false
-                                        }
+                                        sending = true
+                                        try {
+                                            val sentComment = attempt { part.comment(commentText.trim()) }.getOrNull()
+                                            commentSent = sentComment != null
+                                            if (sentComment != null) {
+                                                commentsState.value = listOf(sentComment) + commentsState.value
+                                                commentText = ""
+                                            }
+                                        } finally { sending = false }
                                     }
 
                                     focusManager.clearFocus(force = true)
                                 }
                             ) {
-                                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null)
+                                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send comment")
                             }
                         },
                         supportingText = {
@@ -359,6 +319,9 @@ fun CommentsModal(showModal: MutableState<Boolean>, part: Part, client: Wattpad,
                         },
                         isError = !commentSent
                     )
+                }
+                if (commentsLeft && !commentsFailed) item {
+                    TextButton(onClick = { after = comments.lastOrNull()?.data?.commentId?.resourceId }) { Text("Load more comments") }
                 }
                 items(comments) {
                     CommentRow(navController = navController, comment = it, client = client, commentsState = commentsState)
@@ -402,7 +365,7 @@ fun CommentRow(navController: NavController, comment: Comment, commentsState: Mu
     LaunchedEffect(key1 = showReplies) {
         if (showReplies && replies.isEmpty()) {
             repliesLoading = true
-            replies = comment.fetchReplies()
+            attempt { replies = comment.fetchReplies() }.onFailure { deletionErrState.value = true }
             repliesLoading = false
         }
     }
@@ -440,22 +403,22 @@ fun CommentRow(navController: NavController, comment: Comment, commentsState: Mu
                         TextButton(
                             onClick = { showReplies = !showReplies }
                         ) {
-                            Text("${when(showReplies) { true -> stringResource(id = R.string.hide) false -> stringResource(id = R.string.show)}} ${comment.data.replyCount} ${stringResource(id = R.string.replies)}")
+                            Text("${if (showReplies) stringResource(R.string.hide) else stringResource(R.string.show)} ${comment.data.replyCount} ${stringResource(id = R.string.replies)}")
                         }
                 }
                 Column (
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    NumberIconButton(icon = ImageVector.vectorResource(id = when (commentLiked) {true -> R.drawable.baseline_favorite_24 false -> R.drawable.outline_favorite_24}), number = likeCount) {
+                    NumberIconButton(icon = ImageVector.vectorResource(id = if (commentLiked) R.drawable.baseline_favorite_24 else R.drawable.outline_favorite_24), number = likeCount) {
                         if (client.loggedIn)
                             coroutineScope.launch {
                                 if (commentLiked) {
-                                    if(comment.unlike() == true) {
+                                    if(attempt { comment.unlike() }.getOrNull() == true) {
                                         commentLiked = false
                                         likeCount -= 1
                                     }
                                 } else {
-                                    if(comment.like() == true) {
+                                    if(attempt { comment.like() }.getOrNull() == true) {
                                         commentLiked = true
                                         likeCount += 1
                                     }
@@ -495,7 +458,7 @@ fun DeleteCommentDialog(showDialogState: MutableState<Boolean>, commentToDel: Co
             TextButton(onClick = {
                 coroutineScope.launch {
                     showDialogState.value = false
-                    val res = commentToDel.delete()
+                    val res = attempt { commentToDel.delete() }.getOrNull()
 
                     if (res != true) {
                         errState.value = true

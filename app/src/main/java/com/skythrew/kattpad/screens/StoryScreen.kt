@@ -1,164 +1,79 @@
 package com.skythrew.kattpad.screens
 
-import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.res.vectorResource
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
-import com.skythrew.kattpad.R
 import com.skythrew.kattpad.api.Story
 import com.skythrew.kattpad.api.Wattpad
-import com.skythrew.kattpad.screens.utils.NumberInfo
+import com.skythrew.kattpad.domain.attempt
+import com.skythrew.kattpad.domain.readingProgress
 import com.skythrew.kattpad.screens.utils.navigateOnce
 import kotlinx.serialization.Serializable
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StoryScreen(padding: PaddingValues, navController: NavController, client: Wattpad, storyId: Int) {
-        var isLoading by remember {
-            mutableStateOf(true)
-        }
-
-        var searchResult: Story? by remember {
-            mutableStateOf(null)
-        }
-
-        var showBottomSheet by remember {
-            mutableStateOf(false)
-        }
-
-        LaunchedEffect (key1 = storyId) {
-            isLoading = true
-            searchResult = client.fetchStory(
-                storyId,
-                setOf(
-                    "title",
-                    "description",
-                    "cover",
-                    "numParts",
-                    "readCount",
-                    "voteCount",
-                    "commentCount",
-                    "createDate",
-                    "modifyDate",
-                    "parts(id,title)"
-                )
-            )
-            isLoading = false
-        }
-
-        Box (modifier = Modifier.padding(padding)){
-            if (isLoading) {
-                Column (modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator()
+    var loading by remember(storyId) { mutableStateOf(true) }
+    var story by remember(storyId) { mutableStateOf<Story?>(null) }
+    var failed by remember(storyId) { mutableStateOf(false) }
+    var retry by remember { mutableIntStateOf(0) }
+    LaunchedEffect(storyId, retry) {
+        loading = true
+        failed = false
+        attempt {
+            story = client.fetchStory(storyId, setOf("title", "description", "cover", "numParts", "readCount", "voteCount", "completed", "firstPartId", "parts(id,title)"))
+        }.onFailure { failed = true }
+        loading = false
+    }
+    Scaffold(topBar = {
+        TopAppBar(title = { Text("Story details") }, navigationIcon = {
+            IconButton(onClick = { navController.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+        })
+    }) { insets ->
+        LazyColumn(Modifier.fillMaxSize().padding(insets), contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+            when {
+                loading -> item { LoadingState() }
+                failed -> item { ErrorState("We couldn’t open this story. Please try again.") { retry++ } }
+                else -> story?.data?.let { data ->
+                    item {
+                        AsyncImage(model = data.cover, contentDescription = "Cover of ${data.title.orEmpty()}", contentScale = ContentScale.Crop, modifier = Modifier.size(144.dp, 216.dp).clip(RoundedCornerShape(16.dp)))
+                        Spacer(Modifier.height(20.dp))
+                        Text(data.title ?: "Untitled story", style = MaterialTheme.typography.headlineLarge, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold)
+                        TextButton(onClick = { navController.navigateOnce(ProfileScreen(data.user.username)) }) { Text("by ${data.user.username}") }
+                        Text("${data.numParts ?: data.parts.orEmpty().size} chapters · ${if (data.completed == true) "Completed" else "Ongoing"}", color = MaterialTheme.colorScheme.primary)
+                        val first = data.readingProgress().partId
+                        Button(enabled = first != null, onClick = { first?.let { navController.navigateOnce(PartScreen(it, storyId)) } }, modifier = Modifier.fillMaxWidth()) { Text("Start reading") }
+                    }
+                    item {
+                        Text("About this story", style = MaterialTheme.typography.titleLarge)
+                        Spacer(Modifier.height(12.dp))
+                        Text(data.description ?: "No description available.", style = MaterialTheme.typography.bodyLarge)
+                    }
+                    item { Text("Table of contents", style = MaterialTheme.typography.titleLarge) }
+                    if (data.parts.isNullOrEmpty()) item { Text("No available chapters were returned for this story.") }
+                    items(data.parts.orEmpty().filter { it.id != null }) { chapter ->
+                        ListItem(headlineContent = { Text(chapter.title ?: "Untitled chapter") }, modifier = Modifier.clickable { chapter.id?.let { navController.navigateOnce(PartScreen(it, storyId)) } })
+                        HorizontalDivider()
+                    }
                 }
             }
-            else
-                Column (horizontalAlignment = Alignment.CenterHorizontally) {
-                    Column (verticalArrangement = Arrangement.spacedBy(15.dp), horizontalAlignment = Alignment.CenterHorizontally){
-                        AsyncImage(model = searchResult?.data?.cover, contentDescription = stringResource(
-                            id = R.string.cover
-                        ))
-                        Text(text = searchResult?.data?.title!!, fontWeight = FontWeight.Bold, fontSize = MaterialTheme.typography.headlineMedium.fontSize)
-                        Row (verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.clickable {
-                            navController.navigateOnce(ProfileScreen(searchResult!!.data.user.username))
-                        }) {
-                            AsyncImage(model = searchResult?.data?.user?.avatar, modifier = Modifier.clip(CircleShape), contentDescription = stringResource(
-                                id = R.string.profile_picture
-                            ))
-                            Text(searchResult?.data?.user?.username ?: "", fontWeight = FontWeight.Bold, fontSize = MaterialTheme.typography.labelLarge.fontSize)
-                        }
-                        Row (horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                            Button(onClick = { /*TODO*/ }) {
-                                Row (verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    Icon(
-                                        ImageVector.vectorResource(R.drawable.outline_menu_book_24),
-                                        contentDescription = ""
-                                    )
-                                    Text(stringResource(id = R.string.read))
-                                }
-                            }
-                            Button(shape = CircleShape, onClick = { showBottomSheet = true }) {
-                                Row (verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)){
-                                    Icon(Icons.AutoMirrored.Filled.List, contentDescription = "")
-                                    Text("${searchResult?.data?.numParts} ${stringResource(id = R.string.chapters)}")
-                                }
-
-                                if (showBottomSheet)
-                                    ModalBottomSheet(onDismissRequest = { showBottomSheet = false }) {
-                                        LazyColumn {
-                                            items(searchResult?.data?.parts!!) {part ->
-                                                Box (modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clickable {
-                                                        navController.navigateOnce(
-                                                            PartScreen(
-                                                                partId = part.id!!,
-                                                                storyId = storyId
-                                                            )
-                                                        )
-                                                    }
-                                                ) {
-                                                    Text(part.title!!, modifier = Modifier.padding(10.dp), fontSize = MaterialTheme.typography.bodyMedium.fontSize, fontWeight = FontWeight.Bold)
-                                                }
-                                            }
-                                        }
-                                    }
-                            }
-                        }
-                        Row (horizontalArrangement = Arrangement.spacedBy(10.dp)){
-                            NumberInfo(icon = ImageVector.vectorResource(R.drawable.visibility), number = searchResult?.data?.readCount!!)
-                            NumberInfo(icon = ImageVector.vectorResource(R.drawable.outline_comment_24), number = searchResult?.data?.commentCount!!)
-                            NumberInfo(icon = ImageVector.vectorResource(R.drawable.outline_favorite_24), number = searchResult?.data?.voteCount!!)
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(10.dp))
-                    HorizontalDivider()
-                    Column(modifier = Modifier.verticalScroll(ScrollState(0))) {
-                        Text(searchResult?.data?.description!!, modifier = Modifier.padding(20.dp))
-                    }
-                }
         }
     }
+}
 
 @Serializable
-data class StoryScreen(
-    val storyId: Int
-)
+data class StoryScreen(val storyId: Int)

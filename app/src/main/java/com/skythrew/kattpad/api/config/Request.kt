@@ -1,6 +1,9 @@
 package com.skythrew.kattpad.api.config
 
 import io.ktor.client.HttpClient
+import io.ktor.client.engine.cio.CIO
+import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.cookies.AcceptAllCookiesStorage
 import io.ktor.client.plugins.compression.ContentEncoding
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.cookies.ConstantCookiesStorage
@@ -27,7 +30,18 @@ import kotlinx.serialization.json.Json
 import java.util.Locale
 
 open class Request {
-    private var client = HttpClient {
+    private fun createClient(cookie: String? = null) = HttpClient(CIO) {
+        expectSuccess = true
+        install(HttpTimeout) {
+            requestTimeoutMillis = 30_000
+            connectTimeoutMillis = 15_000
+            socketTimeoutMillis = 30_000
+        }
+        install(HttpCookies) {
+            storage = if (cookie == null) AcceptAllCookiesStorage() else ConstantCookiesStorage(
+                Cookie(name = "token", value = cookie, domain = ".wattpad.com", path = "/", secure = true)
+            )
+        }
         install(ContentNegotiation) {
             json()
         }
@@ -39,6 +53,10 @@ open class Request {
             header("Accept-Language", Locale.getDefault().toLanguageTag())
         }
     }
+
+    private var client = createClient()
+
+    fun close() = client.close()
 
     private val apis = mapOf(
         "v2" to "https://www.wattpad.com/apiv2/",
@@ -56,21 +74,9 @@ open class Request {
     }
 
     fun updateHttpClient(cookie: String? = null) {
-        client = client.config {
-            install(HttpCookies) {
-                storage =
-                    if (cookie != null)
-                        ConstantCookiesStorage(
-                            Cookie(
-                                name = "token",
-                                value = cookie,
-                                domain = ".wattpad.com"
-                            )
-                        )
-                    else
-                        ConstantCookiesStorage()
-            }
-        }
+        val previous = client
+        client = createClient(cookie)
+        previous.close()
     }
 
     suspend fun getAPI(api: String, path: String, options: HttpRequestBuilder.() -> Unit): HttpResponse {
@@ -116,11 +122,11 @@ open class Request {
     }
 
     suspend inline fun <reified T> fetchObjData(api: String, path: String, fields: Set<String>, limit: Int = 0, offset: Int = 0): T {
-        val params: Map<String, String> = mapOf(
-            "offset" to offset.toString(),
-            when { fields.isNotEmpty() -> "fields" to fields.joinToString(",") else -> "" to ""},
-            "limit" to limit.toString(),
-        )
+        val params = buildMap {
+            put("offset", offset.toString())
+            if (fields.isNotEmpty()) put("fields", fields.joinToString(","))
+            put("limit", limit.toString())
+        }
 
         return fetch(api, path, params)
     }

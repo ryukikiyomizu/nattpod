@@ -80,7 +80,7 @@ data class Part (
         if (!client.loggedIn || data.story == null)
             return null
 
-        return if (data.voted!!)
+        return if (data.voted == true)
             unvote()
         else
             vote()
@@ -120,10 +120,11 @@ data class Part (
         if (!client.loggedIn)
             return null
 
+        val partId = data.id ?: return null
         val res =  client.postAPI("v2", "syncreadingposition") {
             contentType(ContentType.Application.FormUrlEncoded)
             setBody(parameters {
-                append("story_id", data.id!!.toString())
+                append("story_id", partId.toString())
                 append("position", "1")
             }.formUrlEncode())
         }

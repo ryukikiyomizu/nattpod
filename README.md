@@ -1,3 +1,81 @@
-# Kattpad - An open-source client for Wattpad
+# Kattpad
 
-Note: This project is not affiliated with Wattpad and only fetches available data from the API, exactly as the website does.
+An independent, open-source **native Android Wattpad client**, built with Kotlin,
+Jetpack Compose, and Ktor. This project is not affiliated with Wattpad. It uses
+Wattpad's existing services; access, login verification, and content availability
+are controlled by Wattpad.
+
+## This rebuild: reading-first foundation
+
+- **Discover:** story and writer search, debounced queries, genre-based searches,
+  explicit pagination, and retryable errors. Genre shelves are search results,
+  not fabricated trending charts or personalized recommendations.
+- **Library:** account library, title filtering, All / Reading / Completed filters,
+  recent-reading order, safe chapter progress, and refresh. “Completed” means the
+  author has marked the story complete, not that the reader finished it.
+- **Reader:** chapter navigation, serif typography, persistent text sizing,
+  Paper / Sepia / Night appearances, votes and comments. Chapter synchronization
+  remains best-effort using the existing endpoint; precise scroll-position sync
+  and offline downloads are not implemented.
+- **Story and writer pages:** working Start reading and table of contents,
+  published stories, paginated follower/following lists, and follow/unfollow.
+- **Account:** encrypted token storage, validated session restoration, local sign
+  out, retry on temporary connection failure, and a recovery screen for unreadable
+  encrypted credentials. Saved tokens are excluded from backup/device transfer.
+
+Network and decoding errors are handled at screen/action boundaries, and coroutine
+cancellation is propagated. Sparse library metadata no longer requires non-null
+reading positions, chapter lists, or chapter totals.
+
+## Build and checks
+
+Requires **JDK 17**, the Android SDK (platform 34), and network access to Gradle,
+Google Maven, and Maven Central. Open the repository in Android Studio or run:
+
+```sh
+./gradlew testDebugUnitTest lintDebug assembleDebug
+```
+
+The `Android checks` GitHub Actions workflow runs those commands on pushes and
+pull requests and uploads test/lint reports and the debug APK. It does not sign or
+publish a production release. Unit tests cover sparse reading metadata, missing
+or removed chapters, bounded progress, API decoding, UTC dates, and cancellation.
+
+### Verification status
+
+The Arena editing environment had no Java installation or Android SDK. Running
+`./gradlew testDebugUnitTest` stopped at the missing Java prerequisite. The code,
+unit tests, and workflow have been added, but **build, lint, and device tests have
+not yet been verified**. Syntax parsing passed for all 41 Kotlin source files,
+all 16 XML files parsed, and `git diff --check` passed; these are not a substitute
+for compilation. A live Wattpad account was not used for testing.
+
+### Device smoke-test checklist
+
+1. Launch without a session: discovery and search work; Library offers sign-in.
+2. Search rapidly and change genres: cancelled requests do not show stale results.
+3. Sign in with valid and invalid credentials; disconnect Wi-Fi while signing in.
+   Controls recover without crashing or leaving the spinner running.
+4. Relaunch with a valid, expired, and offline session. Offline restoration keeps
+   the saved token and offers retry in Account; an HTTP 401 removes it.
+5. Open libraries with unstarted stories and missing reading-position/chapter
+   fields. Refresh, filter, open a story, and navigate to its chapters.
+6. Read a chapter, change text size and appearance, relaunch, and confirm settings
+   persist. Test first/last chapter boundaries and unavailable chapter text.
+7. Vote, comment, load more comments, delete your comment, follow/unfollow, and
+   test each operation offline. Check guest comment/vote controls are disabled.
+8. Sign out and relaunch: account identity and library are no longer displayed.
+9. Restore a device backup: old encrypted tokens must not be transferred.
+
+## Next phases (not implemented)
+
+1. Device crash-report/logcat verification and API contract tests.
+2. Local reading-history/bookmark persistence and robust library pagination.
+3. API-verified reading-list management and notifications.
+4. Rights-respecting offline reading, where the service permits it.
+5. Writing/publishing only after verifying supported authenticated endpoints.
+6. Move new UI copy into Android string resources and complete French localization.
+
+This is a first rebuild slice, **not full Wattpad feature parity**. No independent
+account system, publishing backend, AI features, or pretend social activity is
+included.

@@ -6,9 +6,9 @@ import java.util.*
 
 @Serializable
 data class StoryReadingPosition(
-    val partId: Int,
-    val position: Int,
-    @Serializable(with = DateSerializer::class) val lastReadDate: Date
+    val partId: Int? = null,
+    val position: Int = 0,
+    @Serializable(with = DateSerializer::class) val lastReadDate: Date? = null
 )
 
 @Serializable

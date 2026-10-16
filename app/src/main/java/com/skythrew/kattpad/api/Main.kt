@@ -9,7 +9,7 @@ import com.skythrew.kattpad.api.requests.UserData
 
 class Wattpad : Authentication() {
     suspend fun fetchLibrary(): Library? {
-        if (!this.loggedIn)
+        if (!this.loggedIn || this.username.isNullOrBlank())
             return null
 
         return Library(this, User(this, UserData(username = this.username!!)).fetchLibrary())

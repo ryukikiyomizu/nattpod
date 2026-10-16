@@ -1,40 +1,28 @@
 package com.skythrew.kattpad.api.requests
 
-import kotlinx.serialization.ExperimentalSerializationApi
-import kotlinx.serialization.Serializer
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
-import java.text.SimpleDateFormat
-import java.util.*
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.util.Date
 
-@OptIn(ExperimentalSerializationApi::class)
-@Serializer(forClass = Date::class)
-object SimpleDateSerializer {
-    private val format = SimpleDateFormat("y-M-d H:m:s", Locale.ENGLISH)
-
-    override fun deserialize(decoder: Decoder): Date {
-        val dateString = decoder.decodeString()
-        return format.parse(dateString)
-    }
-
-    override fun serialize(encoder: Encoder, value: Date) {
-        val dateString = format.format(value)
-        encoder.encodeString(dateString)
-    }
+/** java.time formatters are thread-safe; API timestamps are UTC, not device-local time. */
+object SimpleDateSerializer : KSerializer<Date> {
+    override val descriptor = PrimitiveSerialDescriptor("SimpleDate", PrimitiveKind.STRING)
+    private val format = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+    override fun deserialize(decoder: Decoder): Date =
+        Date.from(LocalDateTime.parse(decoder.decodeString(), format).toInstant(ZoneOffset.UTC))
+    override fun serialize(encoder: Encoder, value: Date) =
+        encoder.encodeString(format.format(value.toInstant().atOffset(ZoneOffset.UTC)))
 }
 
-@OptIn(ExperimentalSerializationApi::class)
-@Serializer(forClass = Date::class)
-object DateSerializer {
-    private val format = SimpleDateFormat("y-M-d'T'H:m:s'Z'", Locale.ENGLISH)
-
-    override fun deserialize(decoder: Decoder): Date {
-        val dateString = decoder.decodeString()
-        return format.parse(dateString)
-    }
-
-    override fun serialize(encoder: Encoder, value: Date) {
-        val dateString = format.format(value)
-        encoder.encodeString(dateString)
-    }
+object DateSerializer : KSerializer<Date> {
+    override val descriptor = PrimitiveSerialDescriptor("Date", PrimitiveKind.STRING)
+    override fun deserialize(decoder: Decoder): Date = Date.from(Instant.parse(decoder.decodeString()))
+    override fun serialize(encoder: Encoder, value: Date) = encoder.encodeString(value.toInstant().toString())
 }

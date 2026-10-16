@@ -1,403 +1,249 @@
 package com.skythrew.kattpad.screens
 
 import androidx.annotation.Keep
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SearchBar
-import androidx.compose.material3.SecondaryTabRow
-import androidx.compose.material3.Tab
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.MutableIntState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
-import coil.request.ImageRequest
-import com.skythrew.kattpad.R
-import com.skythrew.kattpad.api.Library
 import com.skythrew.kattpad.api.Wattpad
+import com.skythrew.kattpad.api.requests.StoryData
+import com.skythrew.kattpad.api.User
+import com.skythrew.kattpad.domain.attempt
+import com.skythrew.kattpad.domain.readingProgress
 import com.skythrew.kattpad.screens.utils.navigateOnce
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
-import kotlin.reflect.KSuspendFunction2
 
 @Composable
-fun HomeScreen(padding: PaddingValues, navController: NavController, client: Wattpad, isLogging: Boolean, isLogged: Boolean) {
-        Column (
-            modifier = Modifier
-                .padding(bottom = padding.calculateBottomPadding()),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            DiscoverySearchBar(navController)
+fun HomeScreen(padding: PaddingValues, navController: NavController, client: Wattpad) {
+    var query by rememberSaveable { mutableStateOf("") }
+    var genre by rememberSaveable { mutableStateOf("Fantasy") }
+    var profiles by rememberSaveable { mutableStateOf(false) }
+    var stories by remember { mutableStateOf<List<StoryData>>(emptyList()) }
+    var users by remember { mutableStateOf<List<User>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var failed by remember { mutableStateOf(false) }
+    var retry by remember { mutableIntStateOf(0) }
+    var offset by remember(query, genre, profiles) { mutableIntStateOf(0) }
+    var nextOffset by remember { mutableIntStateOf(0) }
+    var hasMore by remember { mutableStateOf(false) }
 
-            if (!isLogged) {
-                Column (
-                    modifier = Modifier
-                        .weight(1F)
-                        .padding(50.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    if (!isLogging) {
-                        Text(
-                            stringResource(id = R.string.login_text),
-                            fontWeight = FontWeight.Thin,
-                            textAlign = TextAlign.Center
-                        )
-                        TextButton(onClick = { navController.navigateOnce(LoginScreen) }) {
-                            Text(stringResource(id = R.string.login))
-                        }
-                    } else {
-                        CircularProgressIndicator()
-                    }
-                }
+    LaunchedEffect(query, genre, profiles, retry, offset) {
+        loading = true
+        failed = false
+        if (offset == 0) {
+            stories = emptyList()
+            users = emptyList()
+        }
+        delay(400)
+        attempt {
+            if (profiles) {
+                val page = if (query.isNotBlank()) client.searchUser(query.trim(), offset) else emptyList()
+                val previousCount = users.size
+                users = (users + page).distinctBy { it.data.username }
+                hasMore = page.isNotEmpty() && users.size > previousCount
+                nextOffset = offset + page.size
             } else {
-                Column (modifier = Modifier.padding(horizontal = 10.dp)) {
-                    Library(navController = navController, client = client)
+                val page = client.searchStory(query.trim().ifBlank { genre }, offset).map { it.data }
+                val previousCount = stories.size
+                stories = (stories + page).distinctBy { it.id }
+                hasMore = page.isNotEmpty() && stories.size > previousCount
+                nextOffset = offset + page.size
+            }
+        }.onFailure { failed = true }
+        loading = false
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(padding),
+        contentPadding = PaddingValues(24.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp)
+    ) {
+        item {
+            Text("KATTPAD / DISCOVER", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.height(12.dp))
+            Text("Your next obsession\nstarts here.", style = MaterialTheme.typography.headlineLarge, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
+            Text("Fresh worlds. Unforgettable voices.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        item {
+            OutlinedTextField(
+                value = query, onValueChange = { query = it }, singleLine = true,
+                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp),
+                placeholder = { Text("Search stories or writers") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) }
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = !profiles, onClick = { profiles = false }, label = { Text("Stories") })
+                FilterChip(selected = profiles, onClick = { profiles = true }, label = { Text("Writers") })
+            }
+        }
+        if (!profiles && query.isBlank()) {
+            item {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(listOf("Fantasy", "Romance", "Mystery", "Teen Fiction", "Science Fiction", "Horror")) { name ->
+                        FilterChip(selected = name == genre, onClick = { genre = name }, label = { Text(name) })
+                    }
+                }
+            }
+            item {
+                Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(24.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("FIND YOUR NEXT WORLD", style = MaterialTheme.typography.labelSmall)
+                        Text("A little escape.\nA whole new perspective.", style = MaterialTheme.typography.headlineSmall, fontFamily = FontFamily.Serif)
+                        Text("Explore $genre stories on Wattpad.", style = MaterialTheme.typography.bodyMedium)
+                    }
                 }
             }
         }
+        item {
+            Text(if (query.isBlank()) if (profiles) "Find a writer" else "Explore $genre" else "Search results", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        }
+        when {
+            profiles -> {
+                if (users.isEmpty() && !loading && !failed) item { Text(if (query.isBlank()) "Search for a Wattpad username to discover their stories." else "No writers found. Try another name.") }
+                items(users) { user ->
+                    ListItem(
+                        headlineContent = { Text(user.data.username) },
+                        leadingContent = { AsyncImage(model = user.data.avatar, contentDescription = null, modifier = Modifier.size(48.dp).clip(RoundedCornerShape(24.dp))) },
+                        modifier = Modifier.clickable { navController.navigateOnce(ProfileScreen(user.data.username)) }
+                    )
+                }
+            }
+            else -> {
+                if (stories.isEmpty() && !loading && !failed) item { Text("No stories found. Try a different title or genre.") }
+                items(stories) { story -> StoryRow(story = story, subtitle = story.description.orEmpty()) { navController.navigateOnce(StoryScreen(story.id)) } }
+            }
+        }
+        when {
+            loading -> item { LoadingState() }
+            failed -> item { ErrorState("We couldn’t load discoveries. Check your connection and try again.") { retry++ } }
+            hasMore -> item { OutlinedButton(onClick = { offset = nextOffset }) { Text("Load more") } }
+        }
+    }
 }
 
 @Composable
-fun Library(navController: NavController, client: Wattpad) {
-    var isLoading by remember {
-        mutableStateOf(true)
+fun LibraryScreen(padding: PaddingValues, navController: NavController, client: Wattpad, isLogging: Boolean, isLogged: Boolean) {
+    var stories by remember { mutableStateOf<List<StoryData>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var failed by remember { mutableStateOf(false) }
+    var retry by remember { mutableIntStateOf(0) }
+    var filter by rememberSaveable { mutableStateOf("All") }
+    var query by rememberSaveable { mutableStateOf("") }
+    LaunchedEffect(isLogged, retry) {
+        if (!isLogged) { loading = false; stories = emptyList(); return@LaunchedEffect }
+        loading = true
+        failed = false
+        attempt { stories = client.fetchLibrary()?.data?.stories.orEmpty().filter { it.deleted != true } }
+            .onFailure { failed = true }
+        loading = false
     }
+    val visible = stories.filter {
+        it.title.orEmpty().contains(query, ignoreCase = true) && when (filter) {
+            "Reading" -> it.readingProgress().chapter > 0
+            "Completed" -> it.completed == true
+            else -> true
+        }
+    }.sortedByDescending { it.readingPosition?.lastReadDate?.time ?: 0L }
 
-    var library: Library? by remember {
-        mutableStateOf(null)
-    }
-
-    LaunchedEffect(Unit) {
-        isLoading = true
-        library = client.fetchLibrary()
-        isLoading = false
-    }
-
-    Column (
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Text(
-            stringResource(R.string.your_stories),
-            fontSize = MaterialTheme.typography.headlineSmall.fontSize
-        )
-        if (isLoading)
-            Row (
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center
-            ) {
-                CircularProgressIndicator()
+    LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        item {
+            Text("YOUR PERSONAL BOOKSHELF", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.height(12.dp))
+            Text("One more chapter.", style = MaterialTheme.typography.headlineLarge, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold)
+            Text("Pick up where your imagination left off.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        when {
+            isLogging || loading -> item { LoadingState() }
+            !isLogged -> item {
+                Text("Your stories, all in one place. Connect your Wattpad account to see your library.")
+                Button(onClick = { navController.navigateOnce(LoginScreen) }) { Text("Connect Wattpad") }
             }
-        else
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 80.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                val sortedStories = library!!.data.stories.sortedByDescending { story -> story.numParts!! -  story.parts!!.indexOf(story.parts.find {data -> data.id == story.readingPosition!!.partId}) + 1}
-                items(sortedStories) {story ->
-                    val currentPartId = story.readingPosition!!.partId
-                    val currentPartNumber = story.parts!!.indexOf(story.parts.find {data -> data.id == currentPartId}) + 1
-                    val chaptersLeft = story.numParts!! - currentPartNumber
-
-                    Column (
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        AsyncImage (
-                            model = ImageRequest.Builder(LocalContext.current).data(story.cover).crossfade(true).build(),
-                            contentDescription = stringResource(R.string.cover),
-                            modifier = Modifier
-                                .width(80.dp)
-                                .height(125.dp)
-                                .clickable {
-                                    navController.navigateOnce(
-                                        PartScreen(partId = currentPartId, storyId = story.id)
-                                    )
-                                }
-                        )
-
-                        LinearProgressIndicator(
-                            progress = {currentPartNumber.toFloat() / story.numParts},
-                            modifier = Modifier
-                                .width(75.dp)
-                                .clip(CircleShape)
-                        )
-
-                        Text(
-                            when (chaptersLeft) {
-                                0 -> stringResource(id = R.string.Finished)
-                                1 -> "1 ${stringResource(id = R.string.chapter_left)}"
-                                else -> "$chaptersLeft ${stringResource(id = R.string.chapters_left)}"
-                            },
-                            textAlign = TextAlign.Center
-                        )
+            failed -> item { ErrorState("Your library couldn’t be loaded. Your stories haven’t been changed.") { retry++ } }
+            else -> {
+                item {
+                    OutlinedTextField(value = query, onValueChange = { query = it }, singleLine = true, label = { Text("Search your library") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("All", "Reading", "Completed").forEach { name ->
+                            FilterChip(selected = filter == name, onClick = { filter = name }, label = { Text(name) })
+                        }
+                    }
+                    Text("${visible.size} stories", style = MaterialTheme.typography.labelMedium)
+                    TextButton(onClick = { retry++ }) { Text("Refresh library") }
+                }
+                if (visible.isEmpty()) item { Text(if (stories.isEmpty()) "A new chapter awaits. Add stories to your library on Wattpad, then refresh here." else "No stories match this filter.") }
+                items(visible) { story ->
+                    val progress = story.readingProgress()
+                    StoryRow(story, if (progress.chapter > 0) "Chapter ${progress.chapter} of ${progress.total} · Continue reading" else "Not started · Open story", progress.fraction) {
+                        val part = progress.partId
+                        if (part != null) navController.navigateOnce(PartScreen(part, story.id))
+                        else navController.navigateOnce(StoryScreen(story.id))
                     }
                 }
             }
+        }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DiscoverySearchBar(navController: NavController) {
-    val coroutineScope = rememberCoroutineScope()
-
-    var activeSearch by rememberSaveable {
-        mutableStateOf(false)
-    }
-
-    var searchText by rememberSaveable {
-        mutableStateOf("")
-    }
-
-    var query by rememberSaveable {
-        mutableStateOf("")
-    }
-
-    val client = Wattpad()
-
-    val tabs = listOf(
-        SearchTab(stringResource(id = R.string.stories), client::searchStory) { data, offset ->
-            val listState = remember {
-                LazyListState()
+fun StoryRow(story: StoryData, subtitle: String, progress: Float? = null, onClick: () -> Unit) {
+    Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f), onClick = onClick) {
+        Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Box(Modifier.size(80.dp, 120.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.primaryContainer), contentAlignment = Alignment.Center) {
+                Text("K", style = MaterialTheme.typography.headlineLarge, fontFamily = FontFamily.Serif)
+                AsyncImage(model = story.cover, contentDescription = "Cover of ${story.title.orEmpty()}", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             }
-
-            LaunchedEffect(key1 = listState.canScrollForward) {
-                if (!listState.canScrollForward) {
-                    offset.intValue += 10
-                }
-            }
-
-            if (data.isNotEmpty()) {
-                LazyColumn(state = listState) {
-                    items(data) {
-                        Card(
-                            modifier = Modifier
-                                .padding(10.dp)
-                                .fillMaxWidth()
-                                .clickable {
-                                    navController.navigateOnce(StoryScreen(it.data.id))
-                                }
-                        ) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                AsyncImage(model = it.data.cover, contentDescription = stringResource(
-                                    id = R.string.cover
-                                ))
-                                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                    Text(
-                                        text = it.data.title!!,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = MaterialTheme.typography.headlineSmall.fontSize,
-                                        overflow = TextOverflow.Ellipsis,
-                                        maxLines = 1
-                                    )
-                                    Text(
-                                        text = it.data.description!!,
-                                        overflow = TextOverflow.Ellipsis,
-                                        minLines = 3,
-                                        maxLines = 3
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        SearchTab(stringResource(id = R.string.profiles), client::searchUser) { data, _ ->
-            LazyColumn (modifier = Modifier.fillMaxSize()){
-                items(data) {
-                    Box (modifier = Modifier.clickable {
-                        navController.navigateOnce(
-                            ProfileScreen(it.data.username)
-                        )
-                    }) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(10.dp)
-                        ) {
-                            AsyncImage(
-                                model = it.data.avatar,
-                                contentDescription = "${it.data.username} avatar",
-                                modifier = Modifier.clip(
-                                    CircleShape
-                                )
-                            )
-                            Text(it.data.username, fontSize = MaterialTheme.typography.labelLarge.fontSize, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
-        }
-    )
-
-    val pagerState = rememberPagerState(pageCount = {tabs.count()})
-
-    LaunchedEffect(key1 = searchText) {
-        if (searchText.isNotBlank()) {
-            if (searchText != query) {
-                delay(1000)
-                query = searchText
-            }
-        } else {
-            query = ""
-        }
-    }
-
-    Row (
-        horizontalArrangement = Arrangement.Center,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        SearchBar(
-            query = searchText,
-            onQueryChange = {
-                searchText = it
-            },
-            onSearch = {activeSearch = false},
-            active = activeSearch,
-            onActiveChange = {activeSearch = it},
-            placeholder = {
-                Text(
-                    stringResource(id = R.string.discovery_placeholder)
-                )
-            },
-            trailingIcon = { Icon(
-                Icons.Default.Search,
-                contentDescription = null
-            )}
-        ) {
-            SecondaryTabRow(selectedTabIndex = pagerState.currentPage) {
-                for (i in 0..<pagerState.pageCount) {
-                    Tab(selected = pagerState.currentPage == i, onClick = { coroutineScope.launch { pagerState.animateScrollToPage(i) }}, text = {Text(tabs[i].title)})
-                }
-            }
-
-            HorizontalPager(state = pagerState) {
-                tabs[it].ShowContent(query = query)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(story.title ?: "Untitled story", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text("by ${story.user.username}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                Text(subtitle, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+                if (progress != null) LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+                else if (story.completed == true) Text("COMPLETED", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
             }
         }
     }
 }
 
-data class SearchTab<T>(
-    val title: String,
-    val request: KSuspendFunction2<String, Int, List<T>>,
-    val content: @Composable (data: List<T>, offset: MutableIntState) -> Unit
-) {
-    @Composable
-    fun ShowContent(query: String) {
-        val offset = remember {
-            mutableIntStateOf(0)
-        }
+@Composable
+fun LoadingState() {
+    Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+}
 
-        var searchResult: List<T> by remember {
-            mutableStateOf(listOf())
-        }
-
-        var isLoading by remember {
-            mutableStateOf(false)
-        }
-
-        LaunchedEffect(key1 = query) {
-            if (query.isNotBlank()) {
-                isLoading = true
-                offset.intValue = 0
-                searchResult = request(query, 0)
-                isLoading = false
-            } else {
-                searchResult = listOf()
-            }
-        }
-
-        LaunchedEffect(key1 = offset.intValue) {
-            if (offset.intValue > 0)
-                searchResult = searchResult.plus(request(query, offset.intValue))
-        }
-
-        if (!isLoading) {
-            Column (
-                modifier = Modifier.fillMaxSize()
-            ) {
-                if (searchResult.isEmpty()) {
-                    Column (
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.Center,
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            stringResource(id = R.string.no_result),
-                            fontWeight = FontWeight.Thin
-                        )
-                    }
-                }
-                else {
-                    content(searchResult, offset)
-                }
-            }
-        }
-        else {
-            Column (
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(5.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                CircularProgressIndicator()
-            }
-        }
+@Composable
+fun ErrorState(message: String, retry: () -> Unit) {
+    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        OutlinedButton(onClick = retry) { Text("Try again") }
     }
 }
 
 @Keep
 @Serializable
 object HomeScreen
+
+@Keep
+@Serializable
+object LibraryScreen
+
+@Keep
+@Serializable
+object AccountScreen

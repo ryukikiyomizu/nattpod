@@ -1,0 +1,47 @@
+name: Android checks
+on:
+  pull_request:
+  push:
+    branches: [main, 'arena/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: android-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --stacktrace
+      - name: Unit tests
+        if: ${{ !cancelled() }}
+        run: ./gradlew testDebugUnitTest --stacktrace
+      - name: Android lint
+        if: ${{ !cancelled() }}
+        run: ./gradlew lintDebug --stacktrace
+      - name: Upload installable debug APK
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: kattpad-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload check reports
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: android-check-reports
+          path: app/build/reports/
+          if-no-files-found: warn
+          retention-days: 14

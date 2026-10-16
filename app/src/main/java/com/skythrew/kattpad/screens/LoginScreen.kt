@@ -11,6 +11,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import com.skythrew.kattpad.domain.attempt
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -57,10 +60,6 @@ fun LoginScreen (padding: PaddingValues, navController: NavController, client: W
         mutableStateOf(false)
     }
 
-    var loggedIn by remember {
-        mutableStateOf(client.loggedIn)
-    }
-
     var incorrectCredentials by remember {
         mutableStateOf(false)
     }
@@ -89,6 +88,7 @@ fun LoginScreen (padding: PaddingValues, navController: NavController, client: W
                 TextField(
                     value = username,
                     singleLine = true,
+                    enabled = !isLogging,
                     onValueChange = {username = it},
                     trailingIcon = {
                         Icon(Icons.Default.Person, contentDescription = null)
@@ -104,6 +104,7 @@ fun LoginScreen (padding: PaddingValues, navController: NavController, client: W
                 TextField(
                     value = password,
                     singleLine = true,
+                    enabled = !isLogging,
                     onValueChange = {password = it},
                     trailingIcon = {
                         Icon(Icons.Default.Lock, contentDescription = null)
@@ -120,35 +121,31 @@ fun LoginScreen (padding: PaddingValues, navController: NavController, client: W
             }
 
 
-            TextButton(onClick = {
+            Button(enabled = !isLogging && username.isNotBlank() && password.isNotBlank(), onClick = {
                 coroutineScope.launch {
                     isLogging = true
-
-                    client.login(
-                        username,
-                        password
-                    )
-
-                    loggedIn = client.loggedIn
-                    incorrectCredentials = client.loggedIn == false
-
-                    if (client.loggedIn) {
-                        loggedState.value = true
-
-                        navController.popBackStack()
-
-                        store.edit {
-                            putString("token", client.getToken())
-
-                            apply()
-                        }
-                    }
-
-                    isLogging = false
+                    incorrectCredentials = false
+                    try {
+                        attempt {
+                            client.login(username.trim(), password)
+                            check(client.loggedIn) { "Login rejected" }
+                            val token = client.getToken()
+                            check(!token.isNullOrBlank()) { "Missing session token" }
+                            store.edit { putString("token", token) }
+                            loggedState.value = true
+                            password = ""
+                            navController.popBackStack()
+                        }.onFailure { incorrectCredentials = true }
+                    } finally { isLogging = false }
                 }
             }) {
-                Text(stringResource(id = R.string.log_in))
+                Text(if (isLogging) "Connecting…" else stringResource(id = R.string.log_in))
             }
+            if (isLogging) CircularProgressIndicator()
+            if (incorrectCredentials) Text(
+                "Couldn’t connect. Check your details and connection. Wattpad may require verification on its website.",
+                color = MaterialTheme.colorScheme.error
+            )
         }
     }
 }
