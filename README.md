@@ -37,18 +37,32 @@ Google Maven, and Maven Central. Open the repository in Android Studio or run:
 ```
 
 The `Android checks` GitHub Actions workflow runs those commands on pushes and
-pull requests and uploads test/lint reports and the debug APK. It does not sign or
+pull requests and uploads test/lint reports and the debug APK as separate artifacts (retained for
+14 days). It does not sign or
 publish a production release. Unit tests cover sparse reading metadata, missing
 or removed chapters, bounded progress, API decoding, UTC dates, and cancellation.
 
 ### Verification status
 
-The Arena editing environment had no Java installation or Android SDK. Running
-`./gradlew testDebugUnitTest` stopped at the missing Java prerequisite. The code,
-unit tests, and workflow have been added, but **build, lint, and device tests have
-not yet been verified**. Syntax parsing passed for all 41 Kotlin source files,
-all 16 XML files parsed, and `git diff --check` passed; these are not a substitute
-for compilation. A live Wattpad account was not used for testing.
+GitHub Actions verified commit `b8d97a9` on October 16, 2026:
+
+- `assembleDebug`: **passed**, debug APK uploaded.
+- `testDebugUnitTest`: **16 tests, 0 failures, 0 errors, 0 skipped**.
+- `lintDebug`: **passed**.
+
+[Verified workflow run](https://github.com/ryukikiyomizu/nattpod/actions/runs/38906231191)
+· [Download debug APK artifact](https://github.com/ryukikiyomizu/nattpod/actions/runs/38906231191/artifacts/12047539553)
+
+Download and unzip **kattpad-debug-apk**, then install `app-debug.apk` on an Android
+10+ device. This is a debug-signed development build, not a production release;
+it may not install over a release-signed app with the same application ID.
+Do not uninstall an existing app without considering its local data.
+
+The editing sandbox itself has no Java or Android SDK; compilation and checks
+were performed on GitHub's hosted runner. Artifact downloads in this sandbox are
+blocked by its network allowlist, so use the GitHub download link above. A live
+Wattpad account and on-device behavior have **not** yet been tested. Passing CI
+is not confirmation that the original signed-in crash is resolved on a device.
 
 ### Device smoke-test checklist
 
